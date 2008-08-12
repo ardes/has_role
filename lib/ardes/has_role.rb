@@ -1,23 +1,48 @@
 module Ardes#:nodoc:
-  # very simple incremental roles
+  # Very simple incremental roles - this is where one role implies all 'below', or 'to the left of' it
   #
-  # Usage:
+  # == Example Usage:
   #
-  #   has_role :admin, :super_admin
+  #   class User < ActiveRecord::Base
+  #     has_role :admin, :super_admin
+  #   end
+  #  
+  #   u = User.new
   #
-  # This allows setting .role = :admin|:sumper_admin|nil.
-  # :role_value will be set in the db
+  #   u.role = :admin
+  #   u.role = :super_admin
+  #   u.role = nil
+  # 
+  # u.role_value will be set in the above to 2, 1, and 0 respectively
   #
-  # .admin? will do role_value >= (admin value)
+  # :role_value is stored on the db
   #
-  # If the model has a role attirbute in db, then a string will be set as well
+  # You also get predicate methods corresponding to the roles
   #
-  # If you do this, you can migrate to a new scheme simply by changing the model def, when records are saved, their role_value
-  # is updated.  So migrating the whole lot means loading and then saving every record.
+  #   u.admin?        # performs u.role_value >= 1
+  #   u.super_admin?  # performs u.role_value >= 2
   #
-  # role_value is there so you can select from the db based on role, e.g:
+  # == Migration
+  #
+  #   change_table :model do |t|
+  #     t.string :role
+  #     t.integer :role_value, :default => 0, :null => false
+  #   end
+  #
+  # :role and :role_value always refer to the same role, and this is enforced by the plugin.
+  # :role_value is always 'subservient' to the :role attribute, and can't be set directly
+  #
+  # The reason both are there is so that
+  #   (i) You can make integer comparisons bewteen roles
+  #
+  #   (ii) You can easily migrate to a new scheme simply by calling the class method migrate_roles
+  #        (which just loads and saves every record).
+  #
+  # :role_value is useful when selecting from the db based on role, e.g:
   #
   #   User.find(:all, :conditions => ["role_value >= ?", User.roles[:admin]])
+  #
+  #   has_scope :admin, :conditions => ["role_value >= ?", User.roles[:admin]]
   #
   # TODO: specs, look into making this an aggregate object
   module HasRole
@@ -34,6 +59,7 @@ module Ardes#:nodoc:
             attr_protected :role, :role_value
             before_save :update_role_value_from_role
             
+            # predicate methods for each role
             self.roles.each do |role, value|
               module_eval <<-end_eval
                 def #{role}?
@@ -43,24 +69,20 @@ module Ardes#:nodoc:
             end
             
             def role_value=(value)
-              raise RuntimeError, "Set the role_value by setting role"
+              raise RuntimeError, "You can't set :role_value directly, just set :role"
             end
             
             def role_value
-              read_attribute(:role_value).blank? ? update_role_value_from_role : read_attribute(:role_value)
+              update_role_value_from_role
             end
             
             def role=(role)
-              role = role.to_s
-              write_attribute(:role_value, roles[role])
-              attribute_names.include?("role") ? write_attribute(:role, role) : @role = role
+              write_attribute(:role, role.to)
+            ensure
+              update_role_value_from_role
             end
             
-            def role
-              attribute_names.include?("role") ? read_attribute(:role) : @role ||= roles.invert[role_value]
-            end
-            
-            # loads and saves every record, use this when you;ve changed the role scheme to update everything
+            # loads and saves every record, use this to migrate all models to a new scheme
             def self.migrate_roles
               transaction do
                 find(:all).each do |model|
@@ -68,7 +90,7 @@ module Ardes#:nodoc:
                 end
               end
             end
-              
+            
           protected
             def update_role_value_from_role
               write_attribute(:role_value, roles[role] || 0)
