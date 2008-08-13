@@ -30,13 +30,14 @@ module Ardes#:nodoc:
   #   end
   #
   # :role and :role_value always refer to the same role, and this is enforced by the plugin.
-  # :role_value is always 'subservient' to the :role attribute, and can't be set directly
+  # :role_value is always 'subservient' to the :role attribute, and can't be set directly.
   #
   # The reason both are there is so that
   #   (i) You can make integer comparisons bewteen roles
   #
-  #   (ii) You can easily migrate to a new scheme simply by calling the class method migrate_roles
-  #        (which just loads and saves every record).
+  #   (ii) You can easily migrate to a new scheme simply by calling the class method update_role_values
+  #
+  #   For example, if you decided you wanted to add a couple of new roles (in a migration)
   #
   # :role_value is useful when selecting from the db based on role, e.g:
   #
@@ -48,7 +49,6 @@ module Ardes#:nodoc:
   module HasRole
     def self.included(base)
       class<<base
-        
         def has_role(*roles)
           class_eval do
             cattr_accessor :roles
@@ -77,13 +77,44 @@ module Ardes#:nodoc:
             end
             
             def role=(role)
-              write_attribute(:role, role.to)
+              write_attribute(:role, role.to_s)
             ensure
               update_role_value_from_role
             end
             
-            # loads and saves every record, use this to migrate all models to a new scheme
-            def self.migrate_roles
+            # Use this to migrate all models to a new role scheme
+            #
+            # For example:
+            #
+            #   class ChangeRoles < ActiveRecord::Migration
+            #     class User < ActiveRecord::Base
+            #       has_role :staff, :admin, :payment_admin, :super_admin
+            #     end
+            #     
+            #     def self.up
+            #       User.update_role_values
+            #     end
+            #
+            #     # if you need to go down
+            #     class DownUser < ActiveRecord::Base
+            #       self.table_name = 'users'
+            #       has_role :admin, :super_admin
+            #     end
+            #
+            #     def self.down
+            #       # first we need to decide what roles :staff and :payment_admin end up as
+            #       # in this case we decide that :staff goes away and :payment_admin becomes admin
+            #       # This means we cna leave :staff alone and just deal with :payment_admin
+            #       User.update_all("role = 'admin'", "role = 'payment_admin'")
+            #
+            #       # now we use the old scheme
+            #       DownUser.update_role_values
+            #     end
+            #   end
+            #
+            # (this method simply loads and saves every record, which sets the 'subservient' :role_value 
+            #  attribute to the new setting)
+            def self.update_role_values
               transaction do
                 find(:all).each do |model|
                   model.save(false)
