@@ -56,7 +56,6 @@ module Ardes#:nodoc:
             self.roles = HashWithIndifferentAccess.new(roles)
             
             validates_inclusion_of :role, :in => self.roles.keys, :allow_blank => true
-            attr_protected :role, :role_value
             before_save :update_role_value_from_role
             
             # predicate methods for each role
